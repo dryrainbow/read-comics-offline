@@ -1,5 +1,4 @@
-var PdfPrinter = require('pdfmake');
-var fs = require('fs');
+const jsPDF = require('jspdf').jsPDF
 const puppeteer = require('puppeteer');
 const prompts = require('prompts');
 
@@ -9,25 +8,13 @@ const SELECTORS = {
 };
 
 (async () => {
-    let { url } = await prompts({
-        type: 'text',
-        name: 'url',
-        message: 'Enter a link to comics',
-        validate: value => isInvalidUrl(value) ? `Please, enter a valid url` : true
-    });
-
-    url = transformUrl(url)
-
-    let { filename } = await prompts({
-        type: 'text',
-        name: 'filename',
-        message: 'Enter a filename for pdf',
-        validate: value => value.length === 0 ? `Please, enter a valid name` : true
-    });
-
-    if (!/.*(\.pdf)$/.test(filename)) {
-        filename += '.pdf'
-    }
+    let {
+        filename,
+        url,
+        quality
+    } = await getConfigOfLoading()
+    url = transformUrl(url, quality)
+    filename = transformFileName(filename)
 
     const browser = await puppeteer.launch({
         headless: false,
@@ -41,11 +28,19 @@ const SELECTORS = {
             images[image.url] = image;
         }
     })
-
-    await page.goto(url, { waitUntil: "networkidle0" });
-    await buildPdf(filename, page, images);
-    console.log(`Comics ${filename} saved, pages: ${Object.keys(images).length}`)
-    browser.close()
+    await page.goto(url, {waitUntil: "domcontentloaded"});
+    await waitForImages(page, SELECTORS.IMAGES);
+    const imagesElements = await page.$$(SELECTORS.IMAGES());
+    // insurance for async bufferizing images
+    let interval = setInterval(async () => {
+        if (Object.keys(images).length < imagesElements.length) {
+            return
+        }
+        clearInterval(interval)
+        await buildPdf(filename, page, images);
+        console.log(`Comics ${filename} saved, pages: ${Object.keys(images).length}`)
+        await browser.close()
+    }, 500)
 })();
 
 
@@ -76,25 +71,81 @@ function isInvalidUrl(url) {
     }
 }
 
-function transformUrl(url) {
+function transformUrl(url, quality) {
     let u = new URL(url)
     u.searchParams.set('readType', '1')
+    u.searchParams.set('quality', quality)
     return u.toString();
+}
+function transformFileName(filename) {
+    if (!/.*(\.pdf)$/.test(filename)) {
+        filename += '.pdf'
+    }
+    return filename
 }
 
 async function buildPdf(filename, page, images) {
-    const doc = { content: [] }
+    const docTest = new jsPDF();
     const elements = await page.$$(SELECTORS.IMAGES());
+    let pageNumber = 0;
     for (const el of elements) {
         const src = await page.evaluate(el => el.getAttribute("src"), el);
-        doc.content.push({
-            image: images[src].content,
-            fit: [595, 800]
-        })
+        const width = await page.evaluate(el => el.clientWidth, el);
+        const height = await page.evaluate(el => el.clientHeight, el);
+        docTest.addPage([width, height], getOrientation(width, height))
+        pageNumber += 1;
+        docTest.setPage(pageNumber + 1)
+        const image = images[src];
+        docTest.addImage(image.content, image.type, 0, 0, width, height, null, 'NONE')
     }
+    docTest.deletePage(1)
+    docTest.save(filename)
+}
 
-    var printer = new PdfPrinter();
-    var pdfDoc = printer.createPdfKitDocument(doc);
-    pdfDoc.pipe(fs.createWriteStream(filename));
-    pdfDoc.end();
+function getOrientation(width, height) {
+    if (width > height) {
+        return 'landscape'
+    } else {
+        return 'portrait'
+    }
+}
+
+async function waitForImages(page) {
+    await page.evaluate(async (selector) => {
+        const selectors = Array.from(document.querySelectorAll(selector));
+        await Promise.all(selectors.map(img => {
+            if (img.complete) return;
+            return new Promise((resolve, reject) => {
+                img.addEventListener('load', resolve);
+                img.addEventListener('error', reject);
+            });
+        }));
+    }, SELECTORS.IMAGES())
+}
+
+
+async function getConfigOfLoading() {
+    return await prompts([
+        {
+            type: 'text',
+            name: 'url',
+            message: 'Enter a link to comics',
+            validate: value => isInvalidUrl(value) ? `Please, enter a valid url` : true
+        },
+        {
+            type: 'text',
+            name: 'filename',
+            message: 'Enter a filename for pdf',
+            validate: value => value.length === 0 ? `Please, enter a valid name` : true
+        },
+        {
+            type: 'select',
+            name: 'quality',
+            message: 'Pick quality',
+            choices: [
+                { title: 'Low', value: 'lq' },
+                { title: 'High', value: 'hq' },
+            ],
+        }
+    ]);
 }

@@ -10,8 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "prompts": "^2.4.2",
+    "jspdf": "^2.5.1",
     "pdfmake": "^0.2.5",
+    "prompts": "^2.4.2",
     "puppeteer": "^15.5.0"
   }
 }
