@@ -1,0 +1,17 @@
+{
+  "name": "read-comics-offline",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node ./src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "prompts": "^2.4.2",
+    "pdfmake": "^0.2.5",
+    "puppeteer": "^15.5.0"
+  }
+}
